@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.4.1"
+readonly SCRIPT_VERSION="2.5.0"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -446,7 +446,37 @@ install_toolkit() {
 }
 
 # =============================================================================
-#  SECTION 10 — Base system
+#  SECTION 10 — DNS resolvers
+# -----------------------------------------------------------------------------
+#  The box's resolver is often unreliable/filtered in IR (github.com, go.dev,
+#  ifconfig.io intermittently fail to resolve). We install a reliable set with
+#  Shecan FIRST — Shecan answers sanctioned dev domains (go.dev, etc.) with its
+#  own unblocking proxy IPs, which is what actually bypasses the IP-level block
+#  from Iran; Cloudflare/Google follow as general fallback.
+# =============================================================================
+setup_dns() {
+  local rc=/etc/resolv.conf
+  [[ -e /etc/resolv.conf.provision.bak ]] || cp -a "$rc" /etc/resolv.conf.provision.bak 2>/dev/null || true
+  # Detach from a manager-owned symlink so our entries persist during the run.
+  [[ -L "$rc" ]] && rm -f "$rc"
+  cat >"$rc" <<'EOF'
+# Managed by provision.sh
+nameserver 178.22.122.100   # Shecan (unblocks go.dev & other sanctioned dev services from IR)
+nameserver 185.51.200.2     # Shecan secondary
+nameserver 1.1.1.1          # Cloudflare
+nameserver 8.8.8.8          # Google
+EOF
+  chmod 644 "$rc"
+  log_ok "DNS set: Shecan (178.22.122.100 / 185.51.200.2) + Cloudflare + Google."
+  if getent hosts go.dev >/dev/null 2>&1; then
+    log_ok "go.dev resolves."
+  else
+    log_warn "go.dev not resolving yet (a manager may be rewriting resolv.conf)."
+  fi
+}
+
+# =============================================================================
+#  SECTION 11 — Base system
 # =============================================================================
 base_setup() {
   _run "apt update" apt-get update -y || return 1
@@ -675,14 +705,20 @@ current_country() {
   curl -fsS --max-time 15 https://ifconfig.io/country_code 2>/dev/null | tr -d '[:space:]'
 }
 
+# The decisive signal: can we actually reach go.dev? With Shecan DNS this can be
+# true even from an Iranian IP, so we test reachability rather than location.
+go_reachable() {
+  curl -fsS --max-time 12 -o /dev/null "https://go.dev/VERSION?m=text" 2>/dev/null
+}
+
 print_proxy_instructions() {
   local ip; ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  printf '\n%s%sAction required — route this machine outside Iran%s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
+  printf '\n%s%sAction required — make go.dev reachable%s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
   cat <<EOF
-Go (go.dev) and several tool sources are filtered from IR, so installation
-cannot continue until this machine's exit IP is outside Iran.
-
-v2ray and v2rayA are already installed. Set up the proxy now:
+go.dev (and other tool sources) are blocked from Iran, so installation cannot
+continue until this machine can reach them. Shecan DNS is already configured and
+usually unblocks go.dev on its own — but if it is still unreachable, bring up the
+proxy (v2ray/v2rayA are already installed):
 
   1. From a device that can reach this server, open:  http://${ip:-<server-ip>}:2017
   2. Create the v2rayA admin account (first visit only).
@@ -696,44 +732,42 @@ EOF
 }
 
 connectivity_gate() {
-  # Go already present → location does not matter.
+  # Go already present → nothing to check.
   if have go || [[ -x /usr/local/go/bin/go ]]; then
-    log_ok "Go already installed — location check not required."
+    log_ok "Go already installed — reachability check not required."
+    return 0
+  fi
+
+  # If go.dev is reachable (via Shecan DNS or a proxy), proceed regardless of IP.
+  if go_reachable; then
+    log_ok "go.dev is reachable — continuing."
     return 0
   fi
 
   local cc; cc="$(current_country)"
-  log "Exit country: ${cc:-unknown}"
-  if [[ -n "$cc" && "$cc" != "IR" ]]; then
-    log_ok "Not in IR — go.dev should be reachable. Continuing."
-    return 0
-  fi
-
-  # In IR (or undetectable) and Go missing: the user must route traffic out.
+  log "go.dev is not reachable (exit country: ${cc:-unknown})."
   print_proxy_instructions
   if ! have_tty; then
-    log_error "In IR without Go and no terminal to confirm proxy setup — cannot continue."
-    log_error "Enable a proxy (or preinstall Go), then re-run."
+    log_error "go.dev unreachable and no terminal to confirm — cannot continue."
     SKIP_NET=1
     return 1
   fi
 
   local ans
   while true; do
-    read_tty ans "Enabled the proxy in TProxy mode? type 'yes' to re-check, or 'skip' to abort: "
+    read_tty ans "Made go.dev reachable (DNS or TProxy)? type 'yes' to re-check, or 'skip' to abort: "
     case "${ans,,}" in
       skip|abort|quit|q)
-        log_warn "Skipping the network-dependent stages (Go unavailable in IR)."
+        log_warn "Skipping the network-dependent stages (go.dev unreachable)."
         SKIP_NET=1
         return 1 ;;
     esac
-    cc="$(current_country)"
-    log "Re-checked exit country: ${cc:-unknown}"
-    if [[ -n "$cc" && "$cc" != "IR" ]]; then
-      log_ok "Exit country is now ${cc}. Proxy works — continuing."
+    if go_reachable; then
+      log_ok "go.dev is now reachable — continuing."
       return 0
     fi
-    log_warn "Still IR or unreachable. Ensure the node is connected and mode is TProxy, then retry."
+    cc="$(current_country)"
+    log_warn "Still unreachable (country: ${cc:-unknown}). Ensure Shecan DNS is active or the proxy is ON (TProxy)."
   done
 }
 
@@ -793,6 +827,7 @@ print_report() {
 # v2ray/v2rayA come before the network gate so the user can route traffic out
 # of Iran (where go.dev is filtered) before the Go/Rust/PD stages run.
 readonly PIPELINE=(
+  "DNS resolvers|setup_dns"
   "Passwords (root + user)|setup_passwords"
   "Base system + core packages|base_setup"
   "Kali repo on Ubuntu|setup_kali_repo_on_ubuntu"
