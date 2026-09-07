@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.5.1"
+readonly SCRIPT_VERSION="2.5.2"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -213,11 +213,13 @@ apt_tool() {
 }
 
 # Install a Go tool system-wide (binary -> /usr/local/bin, usable by all users).
-# GOPROXY/GOSUMDB target a reachable mirror: proxy.golang.org and sum.golang.org
-# are Google-hosted and geo-blocked in some regions, which breaks `go install`.
+# GOPROXY uses the official proxy.golang.org (which Shecan DNS unblocks from IR,
+# same family as go.dev) with a `direct` fallback that fetches straight from the
+# module's VCS. GOSUMDB=off avoids a dependency on sum.golang.org. Override
+# GOPROXY via env if you route through a proxy (e.g. a working v2ray tunnel).
 go_install_global() {
   GOBIN=/usr/local/bin GOPATH=/root/go GOFLAGS=-buildvcs=false \
-  GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" GOSUMDB="${GOSUMDB:-off}" \
+  GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}" GOSUMDB="${GOSUMDB:-off}" \
     /usr/local/go/bin/go install -v "$1"
 }
 
@@ -564,7 +566,7 @@ install_go() {
 export GOROOT=/usr/local/go
 export GOPATH="$HOME/go"
 export PATH="$GOROOT/bin:$GOPATH/bin:$HOME/.pdtm/go/bin:/usr/local/bin:$PATH"
-export GOPROXY=https://goproxy.cn,direct
+export GOPROXY=https://proxy.golang.org,direct
 export GOSUMDB=off
 EOF
   chmod 644 /etc/profile.d/go.sh
@@ -577,7 +579,7 @@ EOF
 export GOROOT=/usr/local/go
 export GOPATH="$HOME/go"
 export PATH="$GOROOT/bin:$GOPATH/bin:$HOME/.pdtm/go/bin:/usr/local/bin:$PATH"
-export GOPROXY=https://goproxy.cn,direct
+export GOPROXY=https://proxy.golang.org,direct
 export GOSUMDB=off
 EOF
   fi
@@ -587,7 +589,7 @@ EOF
   export GOROOT=/usr/local/go
   export GOPATH="${GOPATH:-/root/go}"
   export PATH="/usr/local/go/bin:/usr/local/bin:$GOPATH/bin:$PATH"
-  export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" GOSUMDB="${GOSUMDB:-off}"
+  export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}" GOSUMDB="${GOSUMDB:-off}"
 
   /usr/local/go/bin/go version >>"$LOG_FILE" 2>&1 || return 1
   log_ok "Go ready: $(/usr/local/go/bin/go version | awk '{print $3}')"
