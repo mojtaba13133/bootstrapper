@@ -7,21 +7,21 @@
 #  even over a pipe.
 #
 #  Usage (recommended for filtered networks — jsDelivr mirror):
-#    curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash
+#    curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash
 #
 #  Or from GitHub raw:
-#    curl -fsSL https://raw.githubusercontent.com/mojtaba13133/bootstrapper/main/install.sh | bash
+#    curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install.sh | bash
 #
 #  Forward arguments to provision.sh with `-s --`:
 #    curl -fsSL <installer-url> | bash -s -- --user hunter --force
 #
 #  Overrides (env):
-#    REPO=mojtaba13133/bootstrapper   BRANCH=main   PROVISION_URL=<direct url to provision.sh>
+#    REPO=<you>/<repo>   BRANCH=main   PROVISION_URL=<direct url to provision.sh>
 # =============================================================================
 set -euo pipefail
 
 # Point these at your fork; override via env without editing the file.
-REPO="${REPO:-mojtaba13133/bootstrapper}"
+REPO="${REPO:-<you>/<repo>}"
 BRANCH="${BRANCH:-main}"
 
 # Mirrors for provision.sh, tried in order. jsDelivr is a GitHub CDN that stays
@@ -58,7 +58,7 @@ download() {
     warn "mirror unreachable — trying next…"
   done
   err "Could not download provision.sh from any mirror."
-  err "Set REPO=mojtaba13133/bootstrapper (and BRANCH), or PROVISION_URL=<direct-url>, and retry."
+  err "Set REPO=<you>/<repo> (and BRANCH), or PROVISION_URL=<direct-url>, and retry."
   return 1
 }
 download || exit 1
