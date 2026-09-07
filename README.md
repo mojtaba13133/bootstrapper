@@ -68,7 +68,7 @@ Or clone and run locally:
 
 ```bash
 git clone https://github.com/mojtaba13133/bootstrapper.git
-cd <repo> && chmod +x provision.sh
+cd bootstrapper && chmod +x provision.sh
 sudo ./provision.sh
 ```
 
