@@ -7,21 +7,21 @@
 #  even over a pipe.
 #
 #  Usage (recommended for filtered networks — jsDelivr mirror):
-#    curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash
+#    curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash
 #
 #  Or from GitHub raw:
-#    curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install.sh | bash
+#    curl -fsSL https://raw.githubusercontent.com/mojtaba13133/bootstrapper/main/install.sh | bash
 #
 #  Forward arguments to provision.sh with `-s --`:
 #    curl -fsSL <installer-url> | bash -s -- --user hunter --force
 #
 #  Overrides (env):
-#    REPO=<you>/<repo>   BRANCH=main   PROVISION_URL=<direct url to provision.sh>
+#    REPO=mojtaba13133/bootstrapper   BRANCH=main   PROVISION_URL=<direct url to provision.sh>
 # =============================================================================
 set -euo pipefail
 
 # Point these at your fork; override via env without editing the file.
-REPO="${REPO:-<you>/<repo>}"
+REPO="${REPO:-mojtaba13133/bootstrapper}"
 BRANCH="${BRANCH:-main}"
 
 # Mirrors for provision.sh, tried in order. jsDelivr is a GitHub CDN that stays
@@ -29,9 +29,13 @@ BRANCH="${BRANCH:-main}"
 # goes first. An explicit PROVISION_URL overrides everything.
 MIRRORS=()
 [[ -n "${PROVISION_URL:-}" ]] && MIRRORS+=("$PROVISION_URL")
+# `?t=<epoch>` is a cache-buster: jsDelivr/GitHub raw cache branch content for a
+# while, so a unique query key forces a fresh copy instead of a stale one. Pin a
+# tag/commit (BRANCH=v2.4.1) for reproducible installs.
+_cb="$(date +%s)"
 MIRRORS+=(
-  "https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/provision.sh"
-  "https://raw.githubusercontent.com/${REPO}/${BRANCH}/provision.sh"
+  "https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/provision.sh?t=${_cb}"
+  "https://raw.githubusercontent.com/${REPO}/${BRANCH}/provision.sh?t=${_cb}"
 )
 
 c_err=$'\e[31m'; c_inf=$'\e[34m'; c_ok=$'\e[32m'; c_warn=$'\e[33m'; c_rst=$'\e[0m'
@@ -58,7 +62,7 @@ download() {
     warn "mirror unreachable — trying next…"
   done
   err "Could not download provision.sh from any mirror."
-  err "Set REPO=<you>/<repo> (and BRANCH), or PROVISION_URL=<direct-url>, and retry."
+  err "Set REPO=mojtaba13133/bootstrapper (and BRANCH), or PROVISION_URL=<direct-url>, and retry."
   return 1
 }
 download || exit 1
