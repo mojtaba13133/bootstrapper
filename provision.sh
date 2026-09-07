@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.2.0"
+readonly SCRIPT_VERSION="2.4.0"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -141,6 +141,7 @@ INSTALL_V2RAY="${INSTALL_V2RAY:-1}"
 INSTALL_V2RAYA="${INSTALL_V2RAYA:-1}"
 PDTM_FOR_ROOT="${PDTM_FOR_ROOT:-1}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
+SKIP_NET=0   # set by the network gate when we can't route outside IR without Go
 
 TOOLS_DIR="${TOOLS_DIR:-/opt/tools}"
 GO_VERSION="${GO_VERSION:-}"
@@ -423,6 +424,7 @@ tool_result_line() {
 
 install_toolkit() {
   [[ "$INSTALL_EXTRA_TOOLS" == "1" ]] || return 3
+  [[ "${SKIP_NET:-0}" == "1" ]] && { log_warn "no outbound route — skipping"; return 3; }
   local total=${#TOOLKIT[@]} idx=0 failures=0 entry name desc fn t0 dur rc
   for entry in "${TOOLKIT[@]}"; do
     IFS='|' read -r name desc fn <<<"$entry"
@@ -512,6 +514,7 @@ EOF
 # =============================================================================
 install_go() {
   [[ "$INSTALL_GO" == "1" ]] || return 3
+  [[ "${SKIP_NET:-0}" == "1" ]] && { log_warn "no outbound route — skipping"; return 3; }
 
   local want="$GO_VERSION"
   [[ -z "$want" ]] && want="$(curl -fsSL https://go.dev/VERSION?m=text | head -n1)"
@@ -521,7 +524,7 @@ install_go() {
     log_ok "Go $want already installed"
   else
     local tgz="${want}.linux-${GOARCH}.tar.gz"
-    _run "downloading $tgz" curl -fsSL "https://go.dev/dl/${tgz}" -o "/tmp/${tgz}" || return 1
+    _run "downloading $tgz" curl -fsSL --retry 3 --retry-delay 2 "https://go.dev/dl/${tgz}" -o "/tmp/${tgz}" || return 1
     _run "extracting Go into /usr/local" \
       bash -c "rm -rf /usr/local/go && tar -C /usr/local -xzf '/tmp/${tgz}' && rm -f '/tmp/${tgz}'" || return 1
   fi
@@ -591,6 +594,7 @@ EOF
 # =============================================================================
 install_pdtm() {
   [[ "$INSTALL_PDTM" == "1" ]] || return 3
+  [[ "${SKIP_NET:-0}" == "1" ]] && { log_warn "no outbound route — skipping"; return 3; }
   have go || { log_error "Go is required for pdtm"; return 1; }
 
   if [[ "$FORCE_REINSTALL" == "1" ]] || ! have pdtm; then
@@ -615,9 +619,16 @@ install_pdtm() {
 install_v2ray() {
   [[ "$INSTALL_V2RAY" == "1" ]] || return 3
   if have v2ray; then log_ok "v2ray already installed"; return 0; fi
-  _run "installing v2ray core" \
-    bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh)' \
-    || return 1
+
+  # Fetch the official installer, preferring the jsDelivr mirror (reachable in
+  # filtered regions) and falling back to raw.githubusercontent.com.
+  local s; s="$(mktemp)"
+  _run "fetching v2ray installer" bash -c "
+    curl -fsSL --retry 3 --retry-delay 2 'https://cdn.jsdelivr.net/gh/v2fly/fhs-install-v2ray@master/install-release.sh' -o '$s' \
+    || curl -fsSL --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh' -o '$s'" \
+    || { rm -f "$s"; return 1; }
+  _run "installing v2ray core" bash "$s" || { rm -f "$s"; return 1; }
+  rm -f "$s"
 }
 
 install_v2raya() {
@@ -636,7 +647,7 @@ install_v2raya() {
     [[ -n "$url" && "$url" != "null" ]] || { log_error "No v2rayA .deb for arch '$va_arch'"; return 1; }
 
     deb="/tmp/$(basename "$url")"
-    _run "downloading v2rayA ($(basename "$url"))" curl -fL "$url" -o "$deb" || return 1
+    _run "downloading v2rayA ($(basename "$url"))" curl -fL --retry 3 --retry-delay 2 "$url" -o "$deb" || return 1
     _run "installing v2rayA" \
       bash -c "apt-get install -y '$deb' || { dpkg -i '$deb'; apt-get -f install -y; }" || return 1
     rm -f "$deb"
@@ -646,6 +657,84 @@ install_v2raya() {
   systemctl start  v2raya >/dev/null 2>&1 || true
   log_ok "v2rayA running — open http://<server-ip>:2017 to import your config"
   log    "   Then: TProxy mode → Start → verify with: curl ifconfig.io"
+}
+
+# =============================================================================
+#  SECTION 16b — Network location gate
+# -----------------------------------------------------------------------------
+#  go.dev (and rustup / crates.io / raw.githubusercontent) are filtered from
+#  Iran. Two conditions decide whether we may continue to the network-heavy
+#  stages:
+#    * Go already installed  -> proceed regardless of location (the Go module
+#      mirror works from IR).
+#    * Go NOT installed      -> the exit IP must be outside IR, or those stages
+#      will certainly fail. We loop, guiding the user to enable the proxy, and
+#      re-check until the country is no longer IR (or the user aborts).
+# =============================================================================
+current_country() {
+  curl -fsS --max-time 15 https://ifconfig.io/country_code 2>/dev/null | tr -d '[:space:]'
+}
+
+print_proxy_instructions() {
+  local ip; ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  printf '\n%s%sAction required — route this machine outside Iran%s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
+  cat <<EOF
+Go (go.dev) and several tool sources are filtered from IR, so installation
+cannot continue until this machine's exit IP is outside Iran.
+
+v2ray and v2rayA are already installed. Set up the proxy now:
+
+  1. From a device that can reach this server, open:  http://${ip:-<server-ip>}:2017
+  2. Create the v2rayA admin account (first visit only).
+  3. Import your v2ray config (paste a vmess:// / vless:// link or a subscription URL).
+  4. Select the imported node and click "Connect".
+  5. Open Settings and set the proxy mode to "TProxy" (transparent proxy) so the
+     whole system — including this installer — is routed through it.
+  6. Confirm the status shows the proxy is running.
+
+EOF
+}
+
+connectivity_gate() {
+  # Go already present → location does not matter.
+  if have go || [[ -x /usr/local/go/bin/go ]]; then
+    log_ok "Go already installed — location check not required."
+    return 0
+  fi
+
+  local cc; cc="$(current_country)"
+  log "Exit country: ${cc:-unknown}"
+  if [[ -n "$cc" && "$cc" != "IR" ]]; then
+    log_ok "Not in IR — go.dev should be reachable. Continuing."
+    return 0
+  fi
+
+  # In IR (or undetectable) and Go missing: the user must route traffic out.
+  print_proxy_instructions
+  if ! have_tty; then
+    log_error "In IR without Go and no terminal to confirm proxy setup — cannot continue."
+    log_error "Enable a proxy (or preinstall Go), then re-run."
+    SKIP_NET=1
+    return 1
+  fi
+
+  local ans
+  while true; do
+    read_tty ans "Enabled the proxy in TProxy mode? type 'yes' to re-check, or 'skip' to abort: "
+    case "${ans,,}" in
+      skip|abort|quit|q)
+        log_warn "Skipping the network-dependent stages (Go unavailable in IR)."
+        SKIP_NET=1
+        return 1 ;;
+    esac
+    cc="$(current_country)"
+    log "Re-checked exit country: ${cc:-unknown}"
+    if [[ -n "$cc" && "$cc" != "IR" ]]; then
+      log_ok "Exit country is now ${cc}. Proxy works — continuing."
+      return 0
+    fi
+    log_warn "Still IR or unreachable. Ensure the node is connected and mode is TProxy, then retry."
+  done
 }
 
 # =============================================================================
@@ -701,17 +790,20 @@ print_report() {
 #  SECTION 18 — Pipeline definition & main
 # =============================================================================
 # Pipeline stages, in order — "Label|function". Add or reorder freely.
+# v2ray/v2rayA come before the network gate so the user can route traffic out
+# of Iran (where go.dev is filtered) before the Go/Rust/PD stages run.
 readonly PIPELINE=(
   "Passwords (root + user)|setup_passwords"
   "Base system + core packages|base_setup"
   "Kali repo on Ubuntu|setup_kali_repo_on_ubuntu"
   "zsh + default shell|install_zsh"
+  "v2ray core|install_v2ray"
+  "v2rayA GUI|install_v2raya"
+  "Network location gate|connectivity_gate"
   "Go toolchain|install_go"
   "Rust toolchain|install_rust"
   "ProjectDiscovery pdtm + tools|install_pdtm"
   "Extra recon toolkit|install_toolkit"
-  "v2ray core|install_v2ray"
-  "v2rayA GUI|install_v2raya"
 )
 
 cleanup() { (( TTY )) && tput cnorm 2>/dev/null; return 0; }
