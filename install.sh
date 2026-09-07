@@ -24,6 +24,13 @@ set -euo pipefail
 REPO="${REPO:-mojtaba13133/bootstrapper}"
 BRANCH="${BRANCH:-main}"
 
+# Guard: a stale/placeholder copy must fail loudly instead of printing a
+# confusing 400/404 for "<you>/<repo>".
+if [[ "$REPO" == *"<"* || "$REPO" == *">"* ]]; then
+  printf '\e[31m[-]\e[0m REPO is a placeholder (%s). This is a stale copy — pass REPO=owner/repo, or purge the CDN cache.\n' "$REPO" >&2
+  exit 1
+fi
+
 # Mirrors for provision.sh, tried in order. jsDelivr is a GitHub CDN that stays
 # reachable in many regions where raw.githubusercontent.com is filtered, so it
 # goes first. An explicit PROVISION_URL overrides everything.
