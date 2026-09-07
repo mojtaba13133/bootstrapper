@@ -10,9 +10,9 @@
 #  Noisy command output is streamed to a timestamped log file; the terminal
 #  shows only progress, per-item results, and the final report.
 #
-#  Each recon tool has its own small install function (see SECTION 9) so that
-#  tool-specific quirks and failures can be handled explicitly. To add a tool,
-#  write a `tool_<name>` function and add one entry to the TOOLKIT array.
+#  Each recon tool has its own dedicated install function (see SECTION 9), so
+#  tool-specific quirks and failures are handled explicitly rather than through a
+#  generic abstraction.
 #
 #  Usage:
 #    sudo ./provision.sh                     # interactive
@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.5.2"
+readonly SCRIPT_VERSION="2.5.3"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -320,8 +320,9 @@ setup_passwords() {
 
 # =============================================================================
 #  SECTION 9 — RECON TOOLKIT
-#  Each tool is an explicit function returning: 0 = installed, 3 = skipped,
-#  non-zero = failed. Register a tool by adding it to the TOOLKIT array below.
+#  Each tool is an explicit install function returning: 0 = installed,
+#  3 = skipped (already present), non-zero = failed. The TOOLKIT array at the end
+#  of this section drives the progress loop and the final report.
 # =============================================================================
 
 # ---- Go-based tools ---------------------------------------------------------
@@ -832,7 +833,7 @@ print_report() {
 # =============================================================================
 #  SECTION 18 — Pipeline definition & main
 # =============================================================================
-# Pipeline stages, in order — "Label|function". Add or reorder freely.
+# Pipeline stages, in execution order — "Label|function".
 # v2ray/v2rayA come before the network gate so the user can route traffic out
 # of Iran (where go.dev is filtered) before the Go/Rust/PD stages run.
 readonly PIPELINE=(
