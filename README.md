@@ -51,25 +51,25 @@ Run `sudo ./provision.sh --list-tools` for the full catalogue.
 Recommended — via the jsDelivr CDN (fast and reliable, including on filtered networks):
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash
 ```
 
 Directly from GitHub:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mojtaba13133/bootstrapper/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install.sh | bash
 ```
 
 Pass options through with `-s --`:
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash -s -- --user hunter --force
+curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash -s -- --user hunter --force
 ```
 
 Or clone and run locally:
 
 ```bash
-git clone https://github.com/mojtaba13133/bootstrapper.git
+git clone https://github.com/<you>/<repo>.git
 cd <repo> && chmod +x provision.sh
 sudo ./provision.sh
 ```
@@ -160,6 +160,12 @@ The script is designed to work from networks where common endpoints are blocked:
   then `raw.githubusercontent.com`.
 - **Bootstrapper** — `install.sh` fetches `provision.sh` from jsDelivr, then raw,
   each with retries, so a flaky `raw.githubusercontent.com` doesn't stop the install.
+- **Iran network gate** — v2ray/v2rayA are installed *before* the Go/Rust/PD
+  stages. If Go isn't already present and the exit IP is in Iran (checked via
+  `ifconfig.io/country_code`), the installer pauses with step-by-step instructions
+  to bring up the proxy in TProxy mode, then re-checks and only continues once the
+  exit IP is outside Iran (where `go.dev` is filtered). If Go is already installed,
+  it proceeds regardless of location.
 
 ## Post-install
 
