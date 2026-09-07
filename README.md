@@ -51,25 +51,25 @@ Run `sudo ./provision.sh --list-tools` for the full catalogue.
 Recommended — via the jsDelivr CDN (fast and reliable, including on filtered networks):
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash
 ```
 
 Directly from GitHub:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mojtaba13133/bootstrapper/main/install.sh | bash
 ```
 
 Pass options through with `-s --`:
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash -s -- --user hunter --force
+curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash -s -- --user hunter --force
 ```
 
 Or clone and run locally:
 
 ```bash
-git clone https://github.com/<you>/<repo>.git
+git clone https://github.com/mojtaba13133/bootstrapper.git
 cd <repo> && chmod +x provision.sh
 sudo ./provision.sh
 ```
