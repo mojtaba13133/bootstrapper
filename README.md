@@ -78,6 +78,17 @@ The installer downloads `provision.sh` (with mirror fallback and retries),
 elevates with `sudo`, and reconnects the terminal so the interactive prompts work
 even when piped. Set `NONINTERACTIVE=1` for unattended runs.
 
+> **jsDelivr caching.** `@main` URLs are cached by the CDN for a while, so right
+> after pushing you may get an older copy. For a guaranteed-fresh install, pin a
+> tag or commit — e.g. `@v2.4.1` instead of `@main` — or purge the cache once:
+>
+> ```bash
+> curl -s https://purge.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh
+> curl -s https://purge.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/provision.sh
+> ```
+>
+> The banner printed at startup shows the version — confirm it matches what you pushed.
+
 ## Usage
 
 ```
