@@ -1,52 +1,27 @@
-A single-command bootstrapper that turns a fresh **Kali** or **Ubuntu** VPS into
-a ready-to-use recon / pentest workstation. It detects the distribution,
-configures users and shells, installs the Go and Rust toolchains, the full
-[ProjectDiscovery](https://github.com/projectdiscovery) suite, a curated recon
-toolkit, and the v2ray / v2rayA proxy stack — **idempotently**, with a live
-progress display and a timed summary.
+# bootstrapper
 
-> Built for people who spin up throwaway boxes often and don't want to
-> hand-install and reconfigure the same stack every time.
+Turn a fresh **Kali** or **Ubuntu** VPS into a ready-to-use recon / pentest
+workstation with one command. `bootstrapper` detects the distribution, configures
+users and shells, installs the Go and Rust toolchains, the full
+[ProjectDiscovery](https://github.com/projectdiscovery) suite, a curated recon
+toolkit, and the v2ray / v2rayA proxy stack — idempotently, with a live progress
+display and a timed summary.
+
+It is built to survive hostile networks: unreliable DNS, sanctioned endpoints,
+and CDN caching are all handled so the run completes instead of dying halfway.
 
 ---
 
-## Features
-
-- **Distro-aware** — detects Kali vs. Ubuntu and CPU architecture (amd64 / arm64).
-- **Idempotent** — safe to re-run; anything already installed is skipped. Use
-  `--force` to reinstall.
-- **Self-contained** — no prerequisites; the script fetches whatever it needs.
-- **Resilient on filtered networks** — mirrors and fallbacks so the common
-  blockers (Google's Go proxy, `sh.rustup.rs`, the v2rayA site) don't stop the run.
-- **Fault-isolated** — every stage and every tool is independent; one failure
-  never aborts the rest.
-- **Readable output** — noisy command output goes to a timestamped log file; the
-  terminal shows a progress bar, per-tool results, and a final report with timings.
-
-## What it installs
-
-| Stage | Contents |
-|-------|----------|
-| Base system | `curl wget git build-essential pkg-config libpcap-dev libssl-dev python3 pipx jq` … |
-| Shell | `zsh` set as the default shell for `root` and the normal user |
-| Go | Latest stable Go, wired system-wide (`/etc/profile.d`, `/etc/zsh/zshenv`) |
-| Rust | `rustup` (with an apt `rustc`/`cargo` fallback) |
-| ProjectDiscovery | `pdtm` + all PD tools (`subfinder`, `httpx`, `nuclei`, `naabu`, `katana`, `dnsx`, …) + nuclei templates |
-| Recon toolkit | `ffuf`, `gau`, `hakrawler`, `VhostFinder`, `amass`, `arjun`, `dirsearch`, `nmap`, `massdns`, `sqlmap`, `BackupKiller`, `x8`, `SecLists` |
-| Proxy | `v2ray` core + `v2rayA` GUI (web UI on port `2017`) |
-
-Run `sudo ./provision.sh --list-tools` for the full catalogue.
-
 ## Requirements
 
-- Kali Rolling or Ubuntu (Debian-like), amd64 or arm64.
-- `root` (the script re-executes itself with `sudo` if needed).
-- Outbound access to GitHub, `go.dev`, the Go module mirror, PyPI, and the apt
-  repositories.
+- Kali Rolling or Ubuntu (Debian-family), `amd64` or `arm64`.
+- Root — the script re-executes itself with `sudo` when needed.
+- Outbound access to GitHub, the Go proxy, PyPI, and the distribution mirrors.
 
 ## Installation
 
-Recommended — via the jsDelivr CDN (fast and reliable, including on filtered networks):
+Via the jsDelivr CDN (recommended — reachable where `raw.githubusercontent.com`
+is not):
 
 ```bash
 curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash
@@ -58,7 +33,7 @@ Directly from GitHub:
 curl -fsSL https://raw.githubusercontent.com/mojtaba13133/bootstrapper/main/install.sh | bash
 ```
 
-Pass options through with `-s --`:
+Forward options through the pipe with `-s --`:
 
 ```bash
 curl -fsSL https://cdn.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh | bash -s -- --user hunter --force
@@ -68,136 +43,102 @@ Or clone and run locally:
 
 ```bash
 git clone https://github.com/mojtaba13133/bootstrapper.git
-cd bootstrapper && chmod +x provision.sh
-sudo ./provision.sh
+cd bootstrapper && sudo bash provision.sh
 ```
 
-The installer downloads `provision.sh` (with mirror fallback and retries),
-elevates with `sudo`, and reconnects the terminal so the interactive prompts work
-even when piped. Set `NONINTERACTIVE=1` for unattended runs.
-
-> **jsDelivr caching.** `@main` URLs are cached by the CDN for a while, so right
-> after pushing you may get an older copy. For a guaranteed-fresh install, pin a
-> tag or commit — e.g. `@v2.5.1` instead of `@main` — or purge the cache once:
->
-> ```bash
-> curl -s https://purge.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/install.sh
-> curl -s https://purge.jsdelivr.net/gh/mojtaba13133/bootstrapper@main/provision.sh
-> ```
->
-> The banner printed at startup shows the version — confirm it matches what you pushed.
+`install.sh` downloads `provision.sh` (jsDelivr first, then GitHub raw, each with
+retries), elevates with `sudo`, and reconnects the terminal so prompts work even
+over a pipe. The startup banner prints the version — check it matches what you
+expect. jsDelivr caches `@main` for a while; pin a tag or commit
+(`@v2.5.3`) for a guaranteed-fresh, reproducible install.
 
 ## Usage
 
 ```
 sudo ./provision.sh [options]
 
-  --user <name>        Normal user to configure (default: auto-detected)
-  --set-passwords      Prompt to set root/user passwords
-  --no-passwords       Never touch passwords
-  --non-interactive    No prompts; use defaults
-  --force              Reinstall tools even if already present
-  --list-tools         Print the tool catalogue and exit
-  -V, --version        Print version and exit
-  -h, --help           Show help
+  --user <name>       Normal user to configure (default: auto-detected)
+  --set-passwords     Prompt to set root/user passwords
+  --no-passwords      Never touch passwords
+  --non-interactive   No prompts; use defaults
+  --force             Reinstall tools even if already present
+  --list-tools        Print the tool catalogue and exit
+  -V, --version       Print version and exit
+  -h, --help          Show help
 ```
 
 ## Configuration
 
-Any stage can be toggled with an environment variable (default `1`):
+Every stage is toggled by an environment variable (default `1`):
 
 ```bash
 INSTALL_V2RAY=0 INSTALL_SECLISTS=0 sudo ./provision.sh
 ```
 
-| Variable | Purpose |
-|----------|---------|
-| `INSTALL_ZSH` `INSTALL_GO` `INSTALL_RUST` `INSTALL_PDTM` | Toggle toolchain / shell stages |
-| `INSTALL_EXTRA_TOOLS` `INSTALL_SECLISTS` | Toggle the recon toolkit / the large SecLists download |
+| Variable | Effect |
+|----------|--------|
+| `INSTALL_ZSH` `INSTALL_GO` `INSTALL_RUST` `INSTALL_PDTM` | Toggle the shell / toolchain stages |
+| `INSTALL_EXTRA_TOOLS` `INSTALL_SECLISTS` | Toggle the recon toolkit / the ~1 GB SecLists download |
 | `INSTALL_V2RAY` `INSTALL_V2RAYA` | Toggle the proxy stack |
-| `PDTM_FOR_ROOT` | Also install the PD suite for `root` (default `1`) |
+| `PDTM_FOR_ROOT` | Also install the ProjectDiscovery suite for `root` |
 | `FORCE_REINSTALL` | Reinstall even when a tool is already present |
-| `NORMAL_USER` `GO_VERSION` `TOOLS_DIR` | Override the user, pinned Go version, git-clone directory |
+| `NORMAL_USER` `GO_VERSION` `TOOLS_DIR` `GOPROXY` | Override the user, Go version, clone dir, Go proxy |
 
-## Adding a tool
+## How it works
 
-Tools are intentionally **explicit** rather than generated from a generic
-abstraction: each one gets its own function so tool-specific quirks and failures
-can be handled directly. Adding a tool is two steps.
+The run is a fixed pipeline; each stage is timed and its result (`OK` / `SKIP` /
+`FAIL`) appears in the final summary:
 
-1. Write a `tool_<name>` function that returns `0` on success, `3` to skip
-   (already installed), or non-zero on failure:
+1. **DNS** — writes a reliable resolver set to `/etc/resolv.conf` (Shecan first,
+   then Cloudflare and Google) and backs up the original.
+2. **Passwords** — optionally sets `root` / user passwords.
+3. **Base system** — `apt` update and core build/runtime packages.
+4. **Kali repo (Ubuntu only)** — adds `kali-rolling` with strict apt pinning.
+5. **zsh** — installs and sets it as the default shell for `root` and the user.
+6. **v2ray core** and **7. v2rayA GUI** — the proxy stack (web UI on port `2017`).
+8. **Network gate** — verifies `go.dev` is reachable before the Go-dependent
+   stages (see *Networking*).
+9. **Go** and **10. Rust** — toolchains, wired system-wide.
+11. **ProjectDiscovery** — `pdtm` plus the full tool suite and nuclei templates.
+12. **Recon toolkit** — `ffuf`, `gau`, `hakrawler`, `VhostFinder`, `amass`,
+    `arjun`, `dirsearch`, `nmap`, `massdns`, `sqlmap`, `BackupKiller`, `x8`,
+    `SecLists`.
 
-   ```bash
-   tool_waybackurls() {
-     present waybackurls && return 3
-     go_install_global "github.com/tomnomnom/waybackurls@latest"
-   }
-   ```
+Run `sudo ./provision.sh --list-tools` for the full catalogue. Git-cloned tools
+live in `/opt/tools` with launchers on `PATH` in `/usr/local/bin`.
 
-   Reusable helpers are available: `present`, `go_install_global`, `apt_tool`,
-   `clone_tool`, and `make_launcher`.
+## Networking
 
-2. Register it in the `TOOLKIT` array (`name|description|function`):
+The script targets environments where common endpoints are blocked or flaky:
 
-   ```bash
-   "waybackurls|Wayback URL fetcher|tool_waybackurls"
-   ```
+- **DNS** — Shecan (`178.22.122.100` / `185.51.200.2`) resolves sanctioned dev
+  services such as `go.dev` to unblocking proxy IPs; Cloudflare and Google follow
+  as general fallback.
+- **Go** — `GOPROXY=https://proxy.golang.org,direct` (unblocked by Shecan) with a
+  `direct` fallback; `GOSUMDB=off`.
+- **Rust** — tries `rustup`, then falls back to the distribution's `rustc` /
+  `cargo` if `sh.rustup.rs` is unreachable.
+- **v2ray / v2rayA** — the core installer is fetched via jsDelivr, and v2rayA is
+  installed from a GitHub release `.deb`, avoiding the blocked `apt.v2raya.org`.
+- **Network gate** — if Go is not already installed and `go.dev` is unreachable,
+  the run pauses with instructions to bring up the proxy (TProxy mode) and
+  re-checks until `go.dev` responds. If Go is already installed, it proceeds.
 
-Adding a whole new **stage** is likewise one line in the `PIPELINE` array.
+## Logs & idempotency
 
-## Logging & idempotency
+Full command output is written to `/var/log/provision-<timestamp>.log` (falling
+back to `/tmp`); the terminal shows only progress and results. Re-running is
+cheap — installed components report `SKIP`, and large downloads are not re-fetched.
+After the run, load the new shell and `PATH` with `exec zsh` or a fresh login.
 
-- Full output is written to `/var/log/provision-<timestamp>.log` (falls back to
-  `/tmp` if `/var/log` isn't writable). If a stage shows `FAIL`, the details are
-  there.
-- Re-running is cheap: installed tools report `SKIP`, and large downloads such as
-  SecLists are not re-fetched.
+## Security
 
-## Filtering resilience
-
-The script is designed to work from networks where common endpoints are blocked:
-
-- **Go** — `GOPROXY=https://goproxy.cn,direct` and `GOSUMDB=off`, because
-  `proxy.golang.org` and `sum.golang.org` are geo-blocked in some regions and
-  otherwise cause `403` failures during `go install`.
-- **Rust** — tries `rustup`, then falls back to the distro's `rustc` / `cargo`
-  packages if `sh.rustup.rs` is unreachable.
-- **v2rayA** — installs the `.deb` straight from GitHub Releases instead of the
-  frequently blocked `apt.v2raya.org`.
-- **v2ray core** — the installer script is fetched from the jsDelivr mirror first,
-  then `raw.githubusercontent.com`.
-- **Bootstrapper** — `install.sh` fetches `provision.sh` from jsDelivr, then raw,
-  each with retries, so a flaky `raw.githubusercontent.com` doesn't stop the install.
-- **DNS** — the first stage writes a reliable resolver set to `/etc/resolv.conf`
-  with **Shecan first** (`178.22.122.100` / `185.51.200.2`), then Cloudflare and
-  Google. Shecan resolves sanctioned dev domains (`go.dev`, etc.) to unblocking
-  proxy IPs, which is what actually makes them reachable from Iran; the others are
-  general fallback. The original `resolv.conf` is backed up to
-  `/etc/resolv.conf.provision.bak`.
-- **Iran network gate** — v2ray/v2rayA are installed *before* the Go/Rust/PD
-  stages. If Go isn't already present, the installer tests whether **`go.dev` is
-  actually reachable** (Shecan DNS often makes it reachable without a proxy). If it
-  is, it continues regardless of location; if not, it pauses with step-by-step
-  instructions to bring up the proxy in TProxy mode, re-checking until `go.dev`
-  responds. If Go is already installed, it proceeds unconditionally.
-
-## Post-install
-
-- Load the new shell and `PATH`: `exec zsh` (or log out and back in).
-- v2rayA: open `http://<server-ip>:2017`, import your config, enable **TProxy**,
-  press **Start**, then verify with `curl ifconfig.io`.
-- Git-cloned tools live under `/opt/tools`, with launchers on `PATH` in
-  `/usr/local/bin`.
-
-## Security notes
-
-- On Ubuntu the Kali repository is added with **apt pinning** (priority `50`), so
-  Kali packages are only ever installed on demand
-  (`apt install -t kali-rolling <pkg>`) and never override the Ubuntu base system.
-- This installs offensive-security tooling. Use it **only** against systems you
-  own or are explicitly authorised to test.
+- On Ubuntu the Kali repository is added with apt pinning (priority `50`), so Kali
+  packages are only ever installed on demand (`apt install -t kali-rolling <pkg>`)
+  and never override the Ubuntu base system.
+- This installs offensive-security tooling. Use it only against systems you own or
+  are explicitly authorised to test.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
