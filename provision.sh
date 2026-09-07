@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.5.0"
+readonly SCRIPT_VERSION="2.5.1"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -365,7 +365,7 @@ tool_x8() {
   have cargo || [[ -x /root/.cargo/bin/cargo ]] || { log_error "cargo unavailable (Rust stage failed?)"; return 1; }
   local dir="$TOOLS_DIR/x8"
   clone_tool "https://github.com/sh1yo/x8" "$dir" || return 1
-  ( export PATH="/root/.cargo/bin:$PATH"; cd "$dir" && cargo build --release ) || return 1
+  ( cd "$dir" && PATH="/root/.cargo/bin:$PATH" cargo build --release ) || return 1
   install -m 755 "$dir/target/release/x8" /usr/local/bin/x8
 }
 
@@ -550,7 +550,7 @@ install_go() {
   [[ -z "$want" ]] && want="$(curl -fsSL https://go.dev/VERSION?m=text | head -n1)"
   [[ -n "$want" ]] || { log_error "Could not determine Go version"; return 1; }
 
-  if have go && [[ "$(go version 2>/dev/null | awk '{print $3}')" == "$want" ]]; then
+  if [[ -x /usr/local/go/bin/go ]] && [[ "$(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')" == "$want" ]]; then
     log_ok "Go $want already installed"
   else
     local tgz="${want}.linux-${GOARCH}.tar.gz"
@@ -581,6 +581,13 @@ export GOPROXY=https://goproxy.cn,direct
 export GOSUMDB=off
 EOF
   fi
+
+  # Make Go usable for the REST of this process too — profile.d/zshenv only
+  # affect new shells, but pdtm's guard and other stages run in THIS process.
+  export GOROOT=/usr/local/go
+  export GOPATH="${GOPATH:-/root/go}"
+  export PATH="/usr/local/go/bin:/usr/local/bin:$GOPATH/bin:$PATH"
+  export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" GOSUMDB="${GOSUMDB:-off}"
 
   /usr/local/go/bin/go version >>"$LOG_FILE" 2>&1 || return 1
   log_ok "Go ready: $(/usr/local/go/bin/go version | awk '{print $3}')"
@@ -625,7 +632,7 @@ EOF
 install_pdtm() {
   [[ "$INSTALL_PDTM" == "1" ]] || return 3
   [[ "${SKIP_NET:-0}" == "1" ]] && { log_warn "no outbound route — skipping"; return 3; }
-  have go || { log_error "Go is required for pdtm"; return 1; }
+  have go || [[ -x /usr/local/go/bin/go ]] || { log_error "Go is required for pdtm"; return 1; }
 
   if [[ "$FORCE_REINSTALL" == "1" ]] || ! have pdtm; then
     _run "installing pdtm" go_install_global "github.com/projectdiscovery/pdtm/cmd/pdtm@latest" || return 1
@@ -870,6 +877,13 @@ main() {
 
   detect_os
   resolve_user
+
+  # If Go persists from a previous run, make it visible to every stage now
+  # (install_go re-exports after a fresh install; this covers the skip case).
+  if [[ -x /usr/local/go/bin/go ]]; then
+    export GOROOT=/usr/local/go GOPATH="${GOPATH:-/root/go}"
+    export PATH="/usr/local/go/bin:/usr/local/bin:$GOPATH/bin:$PATH"
+  fi
 
   STEP_TOTAL=${#PIPELINE[@]}
   local entry
