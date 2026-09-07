@@ -1,5 +1,3 @@
-# provision.sh
-
 A single-command bootstrapper that turns a fresh **Kali** or **Ubuntu** VPS into
 a ready-to-use recon / pentest workstation. It detects the distribution,
 configures users and shells, installs the Go and Rust toolchains, the full
@@ -171,12 +169,18 @@ The script is designed to work from networks where common endpoints are blocked:
   then `raw.githubusercontent.com`.
 - **Bootstrapper** — `install.sh` fetches `provision.sh` from jsDelivr, then raw,
   each with retries, so a flaky `raw.githubusercontent.com` doesn't stop the install.
+- **DNS** — the first stage writes a reliable resolver set to `/etc/resolv.conf`
+  with **Shecan first** (`178.22.122.100` / `185.51.200.2`), then Cloudflare and
+  Google. Shecan resolves sanctioned dev domains (`go.dev`, etc.) to unblocking
+  proxy IPs, which is what actually makes them reachable from Iran; the others are
+  general fallback. The original `resolv.conf` is backed up to
+  `/etc/resolv.conf.provision.bak`.
 - **Iran network gate** — v2ray/v2rayA are installed *before* the Go/Rust/PD
-  stages. If Go isn't already present and the exit IP is in Iran (checked via
-  `ifconfig.io/country_code`), the installer pauses with step-by-step instructions
-  to bring up the proxy in TProxy mode, then re-checks and only continues once the
-  exit IP is outside Iran (where `go.dev` is filtered). If Go is already installed,
-  it proceeds regardless of location.
+  stages. If Go isn't already present, the installer tests whether **`go.dev` is
+  actually reachable** (Shecan DNS often makes it reachable without a proxy). If it
+  is, it continues regardless of location; if not, it pauses with step-by-step
+  instructions to bring up the proxy in TProxy mode, re-checking until `go.dev`
+  responds. If Go is already installed, it proceeds unconditionally.
 
 ## Post-install
 
