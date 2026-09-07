@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.4.0"
+readonly SCRIPT_VERSION="2.4.1"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
