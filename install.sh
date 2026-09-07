@@ -38,7 +38,7 @@ MIRRORS=()
 [[ -n "${PROVISION_URL:-}" ]] && MIRRORS+=("$PROVISION_URL")
 # `?t=<epoch>` is a cache-buster: jsDelivr/GitHub raw cache branch content for a
 # while, so a unique query key forces a fresh copy instead of a stale one. Pin a
-# tag/commit (BRANCH=v2.4.1) for reproducible installs.
+# tag/commit (BRANCH=v2.5.1) for reproducible installs.
 _cb="$(date +%s)"
 MIRRORS+=(
   "https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/provision.sh?t=${_cb}"
