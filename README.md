@@ -46,32 +46,37 @@ Run `sudo ./provision.sh --list-tools` for the full catalogue.
 - Outbound access to GitHub, `go.dev`, the Go module mirror, PyPI, and the apt
   repositories.
 
-## Quick start
+## Installation
 
-One line — download and run straight from GitHub (prompts still work over the pipe):
+Recommended — via the jsDelivr CDN (fast and reliable, including on filtered networks):
+
+```bash
+curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash
+```
+
+Directly from GitHub:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install.sh | bash
 ```
 
-Pass arguments through with `-s --`:
+Pass options through with `-s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/install.sh | bash -s -- --user hunter --force
+curl -fsSL https://cdn.jsdelivr.net/gh/<you>/<repo>@main/install.sh | bash -s -- --user hunter --force
 ```
 
 Or clone and run locally:
 
 ```bash
 git clone https://github.com/<you>/<repo>.git
-cd <repo>
-chmod +x provision.sh
+cd <repo> && chmod +x provision.sh
 sudo ./provision.sh
 ```
 
-`install.sh` downloads `provision.sh`, elevates with `sudo`, and reconnects the
-terminal so the interactive prompts work even when piped. Point it at a fork or a
-pinned tag with `PROVISION_URL=...`. For unattended runs, set `NONINTERACTIVE=1`.
+The installer downloads `provision.sh` (with mirror fallback and retries),
+elevates with `sudo`, and reconnects the terminal so the interactive prompts work
+even when piped. Set `NONINTERACTIVE=1` for unattended runs.
 
 ## Usage
 
@@ -151,6 +156,10 @@ The script is designed to work from networks where common endpoints are blocked:
   packages if `sh.rustup.rs` is unreachable.
 - **v2rayA** — installs the `.deb` straight from GitHub Releases instead of the
   frequently blocked `apt.v2raya.org`.
+- **v2ray core** — the installer script is fetched from the jsDelivr mirror first,
+  then `raw.githubusercontent.com`.
+- **Bootstrapper** — `install.sh` fetches `provision.sh` from jsDelivr, then raw,
+  each with retries, so a flaky `raw.githubusercontent.com` doesn't stop the install.
 
 ## Post-install
 
