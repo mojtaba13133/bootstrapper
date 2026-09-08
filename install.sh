@@ -41,8 +41,8 @@ MIRRORS=()
 # tag/commit (BRANCH=v2.5.1) for reproducible installs.
 _cb="$(date +%s)"
 MIRRORS+=(
-  "https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/provision.sh?t=${_cb}"
   "https://raw.githubusercontent.com/${REPO}/${BRANCH}/provision.sh?t=${_cb}"
+  "https://cdn.jsdelivr.net/gh/${REPO}@${BRANCH}/provision.sh?t=${_cb}"
 )
 
 c_err=$'\e[31m'; c_inf=$'\e[34m'; c_ok=$'\e[32m'; c_warn=$'\e[33m'; c_rst=$'\e[0m'
@@ -69,7 +69,7 @@ download() {
     warn "mirror unreachable — trying next…"
   done
   err "Could not download provision.sh from any mirror."
-  err "Set REPO=mojtaba13133/bootstrapper (and BRANCH), or PROVISION_URL=<direct-url>, and retry."
+  err "Set REPO=/bootstrapper (and BRANCH), or PROVISION_URL=<direct-url>, and retry."
   return 1
 }
 download || exit 1
