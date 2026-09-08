@@ -50,7 +50,7 @@ cd bootstrapper && sudo bash provision.sh
 retries), elevates with `sudo`, and reconnects the terminal so prompts work even
 over a pipe. The startup banner prints the version — check it matches what you
 expect. jsDelivr caches `@main` for a while; pin a tag or commit
-(`@v2.5.3`) for a guaranteed-fresh, reproducible install.
+(`@v2.7.0`) for a guaranteed-fresh, reproducible install.
 
 ## Usage
 
@@ -120,6 +120,11 @@ The script targets environments where common endpoints are blocked or flaky:
   `cargo` if `sh.rustup.rs` is unreachable.
 - **v2ray / v2rayA** — the core installer is fetched via jsDelivr, and v2rayA is
   installed from a GitHub release `.deb`, avoiding the blocked `apt.v2raya.org`.
+- **Unstable links** — every network step retries with timeouts (including on
+  DNS/connection errors), and country detection falls back across several services
+  (`ifconfig.io`, `api.ipmyp.ir`, `ipinfo.io`, `api.country.is`). If a stage still
+  fails, the run pauses and offers to retry it rather than silently skipping — so a
+  dropped download doesn't leave a half-provisioned box.
 - **Network gate** — if Go is not already installed and `go.dev` is unreachable,
   the run pauses with instructions to bring up the proxy (TProxy mode) and
   re-checks until `go.dev` responds. If Go is already installed, it proceeds.
