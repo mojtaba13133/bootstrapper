@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.6.0"
+readonly SCRIPT_VERSION="2.7.1"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -126,6 +126,49 @@ ask_yn() {
   [[ "${reply:-$default}" =~ ^[Yy]$ ]]
 }
 
+# Ask whether to retry a failed network operation. Returns 0 = retry, 1 = give
+# up. With no terminal (non-interactive) it gives up so the run can't hang.
+ask_retry() {
+  local label="$1" ans
+  have_tty || return 1
+  read_tty ans "[$label] still failing — check your connection/proxy, then type 'retry' (or 'skip'): "
+  case "${ans,,}" in skip|s|abort|quit|q|n|no) return 1 ;; *) return 0 ;; esac
+}
+
+# net_retry "<label>" <cmd...> : run a network command with resilience for
+# flaky links. Retries up to NET_TRIES with growing backoff; if still failing
+# and a terminal is present, asks the user to fix connectivity and retry — it
+# never silently gives up and moves on. Returns 0 on success, 1 if the user
+# skips (or there's no terminal to ask).
+net_retry() {
+  local label="$1"; shift
+  local tries="${NET_TRIES:-5}" i
+  while true; do
+    for (( i = 1; i <= tries; i++ )); do
+      if _run "$label (try $i/$tries)" "$@"; then return 0; fi
+      sleep "$(( i < 5 ? i * 2 : 10 ))"
+    done
+    log_warn "$label failed after $tries attempts."
+    ask_retry "$label" || return 1
+  done
+}
+
+# Like net_retry but for a recon-tool function, driving the toolkit's progress
+# line instead of the spinner. Returns 0/3 straight through (installed/skipped),
+# retries other failures, prompts the user, and returns 1 only if they skip.
+run_tool_retry() {
+  local name="$1" fn="$2" tries="${NET_TRIES:-5}" i rc
+  while true; do
+    for (( i = 1; i <= tries; i++ )); do
+      "$fn" >>"$LOG_FILE" 2>&1; rc=$?
+      (( rc == 0 || rc == 3 )) && return "$rc"
+      (( TTY )) && printf '\r  %s! retry %d/%d%s %s\e[K' "$C_YELLOW" "$i" "$tries" "$C_RESET" "$name"
+      sleep 2
+    done
+    ask_retry "install $name" || return 1
+  done
+}
+
 # =============================================================================
 #  SECTION 4 — Configuration (env overrides + CLI flags)
 # =============================================================================
@@ -141,6 +184,7 @@ INSTALL_V2RAY="${INSTALL_V2RAY:-1}"
 INSTALL_V2RAYA="${INSTALL_V2RAYA:-1}"
 PDTM_FOR_ROOT="${PDTM_FOR_ROOT:-1}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
+NET_TRIES="${NET_TRIES:-5}"   # auto-retries per network operation before prompting
 SKIP_NET=0   # set by the network gate when we can't route outside IR without Go
 
 TOOLS_DIR="${TOOLS_DIR:-/opt/tools}"
@@ -259,15 +303,30 @@ STEP_IDX=0
 
 # run_step "<label>" <function> : run one pipeline stage, time it, record the
 # outcome. Convention: rc 0 = OK, rc 3 = SKIP, anything else = FAIL.
+# On failure (interactive), offer to retry the whole stage — so a transient
+# network problem never silently skips a stage; the user fixes connectivity and
+# retries, or explicitly skips.
 run_step() {
   local label="$1"; shift
   STEP_IDX=$(( STEP_IDX + 1 ))
   printf '\n%s%s[%d/%d]%s %s%s%s\n' \
     "$C_BOLD" "$C_CYAN" "$STEP_IDX" "$STEP_TOTAL" "$C_RESET" "$C_BOLD" "$label" "$C_RESET"
 
-  local t0=$SECONDS rc
-  "$@"; rc=$?
-  local dur=$(( SECONDS - t0 )) state
+  local t0=$SECONDS rc state ans
+  while true; do
+    "$@"; rc=$?
+    if [[ $rc -eq 0 || $rc -eq 3 ]]; then break; fi
+    log_error "$label — failed (rc=$rc, see $LOG_FILE)"
+    # Non-interactive or no terminal: can't ask, so give up on this stage.
+    if [[ "${NONINTERACTIVE:-0}" == "1" ]] || ! have_tty; then break; fi
+    read_tty ans "Stage '$label' failed. Fix connectivity, then retry? [Y/n]: "
+    case "${ans,,}" in
+      n|no|skip|s) break ;;
+      *) log_warn "Retrying '$label'…" ;;
+    esac
+  done
+
+  local dur=$(( SECONDS - t0 ))
   case "$rc" in
     0) state="OK";   log_ok   "$label — done ($(fmt_dur "$dur"))" ;;
     3) state="SKIP"; log_warn "$label — skipped" ;;
@@ -435,7 +494,7 @@ install_toolkit() {
     draw_bar "$idx" "$total" "installing ${name} ..."
 
     t0=$SECONDS
-    "$fn" >>"$LOG_FILE" 2>&1; rc=$?
+    run_tool_retry "$name" "$fn"; rc=$?
     dur=$(( SECONDS - t0 ))
 
     case "$rc" in
@@ -550,14 +609,14 @@ install_go() {
   [[ "${SKIP_NET:-0}" == "1" ]] && { log_warn "no outbound route — skipping"; return 3; }
 
   local want="$GO_VERSION"
-  [[ -z "$want" ]] && want="$(curl -fsSL https://go.dev/VERSION?m=text | head -n1)"
+  [[ -z "$want" ]] && want="$(curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 https://go.dev/VERSION?m=text | head -n1)"
   [[ -n "$want" ]] || { log_error "Could not determine Go version"; return 1; }
 
   if [[ -x /usr/local/go/bin/go ]] && [[ "$(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')" == "$want" ]]; then
     log_ok "Go $want already installed"
   else
     local tgz="${want}.linux-${GOARCH}.tar.gz"
-    _run "downloading $tgz" curl -fsSL --retry 3 --retry-delay 2 "https://go.dev/dl/${tgz}" -o "/tmp/${tgz}" || return 1
+    net_retry "downloading Go ($tgz)" curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 --max-time 600 "https://go.dev/dl/${tgz}" -o "/tmp/${tgz}" || return 1
     _run "extracting Go into /usr/local" \
       bash -c "rm -rf /usr/local/go && tar -C /usr/local -xzf '/tmp/${tgz}' && rm -f '/tmp/${tgz}'" || return 1
   fi
@@ -604,7 +663,7 @@ install_rust() {
   if have cargo; then log_ok "Rust/cargo already present"; return 0; fi
 
   # sh.rustup.rs is often filtered (connection reset); fall back to apt packages.
-  if curl -fsSL --retry 2 --connect-timeout 15 https://sh.rustup.rs -o /tmp/rustup-init.sh 2>/dev/null; then
+  if curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 https://sh.rustup.rs -o /tmp/rustup-init.sh 2>/dev/null; then
     _run "installing rustup" sh /tmp/rustup-init.sh -y --no-modify-path || true
     rm -f /tmp/rustup-init.sh
     # shellcheck disable=SC1091
@@ -638,7 +697,7 @@ install_pdtm() {
   have go || [[ -x /usr/local/go/bin/go ]] || { log_error "Go is required for pdtm"; return 1; }
 
   if [[ "$FORCE_REINSTALL" == "1" ]] || ! have pdtm; then
-    _run "installing pdtm" go_install_global "github.com/projectdiscovery/pdtm/cmd/pdtm@latest" || return 1
+    net_retry "installing pdtm" go_install_global "github.com/projectdiscovery/pdtm/cmd/pdtm@latest" || return 1
   fi
 
   local users=("$NORMAL_USER")
@@ -669,64 +728,101 @@ install_v2ray() {
   if have v2ray; then log_ok "v2ray already installed"; return 0; fi
 
   # Fetch the official installer, preferring the jsDelivr mirror (reachable in
-  # filtered regions) and falling back to raw.githubusercontent.com.
+  # filtered regions) and falling back to raw.githubusercontent.com. --retry-all-
+  # errors also retries DNS/connection failures on unstable links.
   local s; s="$(mktemp)"
-  _run "fetching v2ray installer" bash -c "
-    curl -fsSL --retry 3 --retry-delay 2 'https://cdn.jsdelivr.net/gh/v2fly/fhs-install-v2ray@master/install-release.sh' -o '$s' \
-    || curl -fsSL --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh' -o '$s'" \
+  net_retry "fetching v2ray installer" bash -c "
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 'https://cdn.jsdelivr.net/gh/v2fly/fhs-install-v2ray@master/install-release.sh' -o '$s' \
+    || curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 'https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh' -o '$s'" \
     || { rm -f "$s"; return 1; }
-  _run "installing v2ray core" bash "$s" || { rm -f "$s"; return 1; }
+  [[ -s "$s" ]] || { rm -f "$s"; log_error "v2ray installer download was empty"; return 1; }
+  net_retry "installing v2ray core" bash "$s" || { rm -f "$s"; return 1; }
   rm -f "$s"
+  systemctl enable v2ray >/dev/null 2>&1 || true
+  systemctl start  v2ray >/dev/null 2>&1 || true
+}
+
+# Resolve the latest v2rayA .deb asset URL for the given arch and download it to
+# $2. One self-contained unit so net_retry can retry the whole thing.
+_fetch_v2raya_deb() {
+  local a="$1" out="$2" url
+  url="$(curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 --max-time 60 \
+          https://api.github.com/repos/v2rayA/v2rayA/releases/latest \
+        | jq -r --arg a "$a" \
+          '.assets[] | select(.name | test("installer_debian_" + $a + "_.*\\.deb$")) | .browser_download_url' \
+        | head -n1)"
+  [[ -n "$url" && "$url" != "null" ]] || { echo "could not resolve v2rayA .deb URL"; return 1; }
+  curl -fL --retry 3 --retry-all-errors --retry-delay 3 --max-time 600 "$url" -o "$out" || return 1
+  [[ -s "$out" ]]
 }
 
 install_v2raya() {
   [[ "$INSTALL_V2RAYA" == "1" ]] || return 3
-  if have v2raya; then
-    log_ok "v2rayA already installed"
-  else
-    # v2rayA's site / apt repo is often filtered; pull the .deb from GitHub.
-    local va_arch url deb
+  if ! have v2raya; then
+    local va_arch deb
     case "$GOARCH" in amd64) va_arch="x64" ;; arm64) va_arch="arm64" ;; *) va_arch="$GOARCH" ;; esac
+    deb="/tmp/v2raya_${va_arch}.deb"
 
-    url="$(curl -fsSL https://api.github.com/repos/v2rayA/v2rayA/releases/latest \
-          | jq -r --arg a "$va_arch" \
-            '.assets[] | select(.name | test("installer_debian_" + $a + "_.*\\.deb$")) | .browser_download_url' \
-          | head -n1)"
-    [[ -n "$url" && "$url" != "null" ]] || { log_error "No v2rayA .deb for arch '$va_arch'"; return 1; }
-
-    deb="/tmp/$(basename "$url")"
-    _run "downloading v2rayA ($(basename "$url"))" curl -fL --retry 3 --retry-delay 2 "$url" -o "$deb" || return 1
-    _run "installing v2rayA" \
-      bash -c "apt-get install -y '$deb' || { dpkg -i '$deb'; apt-get -f install -y; }" || return 1
+    # Resolve the release asset URL and download it as one retryable unit, so a
+    # flaky GitHub release CDN (release-assets.githubusercontent.com) is retried
+    # and, if it keeps failing, the user is asked to fix connectivity and retry.
+    net_retry "downloading v2rayA (.deb)" _fetch_v2raya_deb "$va_arch" "$deb" || return 1
+    net_retry "installing v2rayA" \
+      bash -c "apt-get install -y '$deb' || { dpkg -i '$deb'; apt-get -f install -y; }" || { rm -f "$deb"; return 1; }
     rm -f "$deb"
+    have v2raya || { log_error "v2rayA install did not produce the 'v2raya' binary"; return 1; }
+  else
+    log_ok "v2rayA already installed"
   fi
 
+  # The install must leave a running service; verify and fail (so the stage can
+  # be retried) if it didn't come up.
   systemctl enable v2raya >/dev/null 2>&1 || true
-  systemctl start  v2raya >/dev/null 2>&1 || true
-  log_ok "v2rayA running — open http://<server-ip>:2017 to import your config"
-  log    "   Then: TProxy mode → Start → verify with: curl ifconfig.io"
+  systemctl restart v2raya >/dev/null 2>&1 || systemctl start v2raya >/dev/null 2>&1 || true
+  if systemctl is-active --quiet v2raya; then
+    log_ok "v2rayA service is running — open http://<server-ip>:2017 to import your config"
+    log    "   Then: TProxy mode → Start → verify with: curl ifconfig.io"
+  else
+    log_error "v2rayA installed but the service is not active"
+    return 1
+  fi
 }
 
 # =============================================================================
 #  SECTION 18 — Network location gate
 # -----------------------------------------------------------------------------
 #  go.dev (and rustup / crates.io / raw.githubusercontent) are filtered from
-#  Iran. Two conditions decide whether we may continue to the network-heavy
-#  stages:
-#    * Go already installed  -> proceed regardless of location (the Go module
-#      mirror works from IR).
-#    * Go NOT installed      -> the exit IP must be outside IR, or those stages
-#      will certainly fail. We loop, guiding the user to enable the proxy, and
-#      re-check until the country is no longer IR (or the user aborts).
+#  Iran. Before the network-heavy stages we decide whether to continue:
+#    * Go already installed  -> proceed (the Go module mirror works from IR).
+#    * Otherwise             -> require that go.dev is actually reachable. With
+#      Shecan DNS this is often true even from an Iranian IP; if not, we loop,
+#      guiding the user to enable the proxy, and re-check until it responds (or
+#      the user aborts). detect_country is only used for the status message.
 # =============================================================================
-current_country() {
-  curl -fsS --max-time 15 https://ifconfig.io/country_code 2>/dev/null | tr -d '[:space:]'
+# Detect the exit country code, trying several services with timeouts so a single
+# flaky/blocked endpoint doesn't leave us blind. Prints e.g. "IR" or nothing.
+detect_country() {
+  local out cc
+  # plain "IR" style endpoints
+  local url
+  for url in https://ifconfig.io/country_code https://ipinfo.io/country; do
+    cc="$(curl -fsS --max-time 10 --retry 2 --retry-all-errors "$url" 2>/dev/null | tr -d '[:space:]')"
+    [[ -n "$cc" && ${#cc} -le 3 ]] && { printf '%s' "$cc"; return 0; }
+  done
+  # JSON endpoints (.countryCode or .country) parsed with jq
+  out="$(curl -fsS --max-time 10 --retry 2 --retry-all-errors https://api.ipmyp.ir/json 2>/dev/null)"
+  cc="$(printf '%s' "$out" | jq -r '.countryCode // empty' 2>/dev/null)"
+  [[ -n "$cc" ]] && { printf '%s' "$cc"; return 0; }
+  out="$(curl -fsS --max-time 10 --retry 2 --retry-all-errors https://api.country.is 2>/dev/null)"
+  cc="$(printf '%s' "$out" | jq -r '.country // empty' 2>/dev/null)"
+  [[ -n "$cc" ]] && { printf '%s' "$cc"; return 0; }
+  return 1
 }
 
 # The decisive signal: can we actually reach go.dev? With Shecan DNS this can be
 # true even from an Iranian IP, so we test reachability rather than location.
 go_reachable() {
-  curl -fsS --max-time 12 -o /dev/null "https://go.dev/VERSION?m=text" 2>/dev/null
+  curl -fsS --max-time 12 --retry 3 --retry-all-errors -o /dev/null "https://go.dev/VERSION?m=text" 2>/dev/null
 }
 
 print_proxy_instructions() {
@@ -762,13 +858,13 @@ connectivity_gate() {
     return 0
   fi
 
-  local cc; cc="$(current_country)"
+  local cc; cc="$(detect_country)"
   log "go.dev is not reachable (exit country: ${cc:-unknown})."
   print_proxy_instructions
   if ! have_tty; then
     log_error "go.dev unreachable and no terminal to confirm — cannot continue."
     SKIP_NET=1
-    return 1
+    return 3
   fi
 
   local ans
@@ -778,13 +874,13 @@ connectivity_gate() {
       skip|abort|quit|q)
         log_warn "Skipping the network-dependent stages (go.dev unreachable)."
         SKIP_NET=1
-        return 1 ;;
+        return 3 ;;
     esac
     if go_reachable; then
       log_ok "go.dev is now reachable — continuing."
       return 0
     fi
-    cc="$(current_country)"
+    cc="$(detect_country)"
     log_warn "Still unreachable (country: ${cc:-unknown}). Ensure Shecan DNS is active or the proxy is ON (TProxy)."
   done
 }
