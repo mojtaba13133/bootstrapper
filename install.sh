@@ -62,7 +62,7 @@ download() {
   for url in "${MIRRORS[@]}"; do
     [[ -n "$url" ]] || continue
     inf "Downloading provision.sh from ${url#https://} …"
-    if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 "$url" -o "$tmp" && [[ -s "$tmp" ]]; then
+    if curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 "$url" -o "$tmp" && [[ -s "$tmp" ]]; then
       ok "Downloaded ($(wc -c <"$tmp") bytes)."
       return 0
     fi
