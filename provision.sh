@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.7.1"
+readonly SCRIPT_VERSION="2.7.2"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -604,19 +604,47 @@ EOF
 # =============================================================================
 #  SECTION 14 — Go toolchain
 # =============================================================================
+# Download the Go tarball, trying mirrors reachable from Iran first. go.dev/dl
+# redirects to dl.google.com (sanction-blocked from IR), so the Aliyun mirror
+# leads. Each candidate is validated as a real gzip tarball, so a saved 404/HTML
+# error page is rejected and the next mirror is tried.
+_download_go() {
+  local tgz="$1" out="$2" url
+  local mirrors=(
+    "https://mirrors.aliyun.com/golang/${tgz}"
+    "https://go.dev/dl/${tgz}"
+    "https://golang.google.cn/dl/${tgz}"
+  )
+  for url in "${mirrors[@]}"; do
+    echo "trying ${url}"
+    if curl -fL --retry 2 --retry-all-errors --retry-delay 3 --max-time 900 "$url" -o "$out" \
+       && [[ -s "$out" ]] && tar -tzf "$out" >/dev/null 2>&1; then
+      echo "ok: ${url}"
+      return 0
+    fi
+    echo "mirror failed or returned a non-tarball: ${url}"
+    rm -f "$out"
+  done
+  return 1
+}
+
 install_go() {
   [[ "$INSTALL_GO" == "1" ]] || return 3
   [[ "${SKIP_NET:-0}" == "1" ]] && { log_warn "no outbound route — skipping"; return 3; }
 
   local want="$GO_VERSION"
-  [[ -z "$want" ]] && want="$(curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 https://go.dev/VERSION?m=text | head -n1)"
-  [[ -n "$want" ]] || { log_error "Could not determine Go version"; return 1; }
+  if [[ -z "$want" ]]; then
+    want="$(curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 --max-time 30 'https://go.dev/VERSION?m=text' 2>/dev/null | head -n1 | tr -dc 'a-z0-9.')"
+    [[ "$want" =~ ^go[0-9]+\.[0-9]+ ]] || \
+      want="$(curl -fsSL --retry 3 --max-time 30 'https://golang.google.cn/VERSION?m=text' 2>/dev/null | head -n1 | tr -dc 'a-z0-9.')"
+  fi
+  [[ "$want" =~ ^go[0-9]+\.[0-9]+ ]] || { log_error "Could not determine a valid Go version (got '${want:-empty}')"; return 1; }
 
   if [[ -x /usr/local/go/bin/go ]] && [[ "$(/usr/local/go/bin/go version 2>/dev/null | awk '{print $3}')" == "$want" ]]; then
     log_ok "Go $want already installed"
   else
     local tgz="${want}.linux-${GOARCH}.tar.gz"
-    net_retry "downloading Go ($tgz)" curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 --max-time 600 "https://go.dev/dl/${tgz}" -o "/tmp/${tgz}" || return 1
+    net_retry "downloading Go ($tgz)" _download_go "$tgz" "/tmp/${tgz}" || return 1
     _run "extracting Go into /usr/local" \
       bash -c "rm -rf /usr/local/go && tar -C /usr/local -xzf '/tmp/${tgz}' && rm -f '/tmp/${tgz}'" || return 1
   fi
@@ -822,7 +850,9 @@ detect_country() {
 # The decisive signal: can we actually reach go.dev? With Shecan DNS this can be
 # true even from an Iranian IP, so we test reachability rather than location.
 go_reachable() {
-  curl -fsS --max-time 12 --retry 3 --retry-all-errors -o /dev/null "https://go.dev/VERSION?m=text" 2>/dev/null
+  curl -fsS --max-time 12 --retry 3 --retry-all-errors -o /dev/null "https://go.dev/VERSION?m=text" 2>/dev/null && return 0
+  curl -fsS --max-time 12 --retry 2 -o /dev/null "https://proxy.golang.org/github.com/projectdiscovery/pdtm/@v/list" 2>/dev/null && return 0
+  curl -fsS --max-time 12 --retry 2 -o /dev/null "https://mirrors.aliyun.com/golang/" 2>/dev/null
 }
 
 print_proxy_instructions() {
