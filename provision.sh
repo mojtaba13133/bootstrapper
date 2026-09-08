@@ -32,7 +32,7 @@
 set -uo pipefail   # deliberately no -e: each stage handles its own errors so a
                    # single failure never aborts the whole run.
 
-readonly SCRIPT_VERSION="2.5.3"
+readonly SCRIPT_VERSION="2.6.0"
 readonly SCRIPT_NAME="${0##*/}"
 
 # =============================================================================
@@ -326,35 +326,35 @@ setup_passwords() {
 # =============================================================================
 
 # ---- Go-based tools ---------------------------------------------------------
-tool_ffuf()        { present ffuf        && return 3; go_install_global "github.com/ffuf/ffuf/v2@latest"; }
-tool_gau()         { present gau         && return 3; go_install_global "github.com/lc/gau/v2/cmd/gau@latest"; }
-tool_hakrawler()   { present hakrawler   && return 3; go_install_global "github.com/hakluke/hakrawler@latest"; }
-tool_vhostfinder() { present VhostFinder && return 3; go_install_global "github.com/wdahlenburg/VhostFinder@latest"; }
-tool_amass()       { present amass       && return 3; go_install_global "github.com/owasp-amass/amass/v4/...@master"; }
+tool_ffuf()        { present ffuf        && return 0; go_install_global "github.com/ffuf/ffuf/v2@latest"; }
+tool_gau()         { present gau         && return 0; go_install_global "github.com/lc/gau/v2/cmd/gau@latest"; }
+tool_hakrawler()   { present hakrawler   && return 0; go_install_global "github.com/hakluke/hakrawler@latest"; }
+tool_vhostfinder() { present VhostFinder && return 0; go_install_global "github.com/wdahlenburg/VhostFinder@latest"; }
+tool_amass()       { present amass       && return 0; go_install_global "github.com/owasp-amass/amass/v4/...@master"; }
 
 # ---- pipx-based Python tools (isolated environments) ------------------------
 _pipx_present() {
   [[ "$FORCE_REINSTALL" == "1" ]] && return 1
   pipx list --short 2>/dev/null | awk '{print $1}' | grep -qx "$1"
 }
-tool_arjun()     { _pipx_present arjun     && return 3; pipx install --force arjun; }
-tool_dirsearch() { _pipx_present dirsearch && return 3; pipx install --force "git+https://github.com/maurosoria/dirsearch.git"; }
+tool_arjun()     { _pipx_present arjun     && return 0; pipx install --force arjun; }
+tool_dirsearch() { _pipx_present dirsearch && return 0; pipx install --force "git+https://github.com/maurosoria/dirsearch.git"; }
 
 # ---- apt-based tools (Kali repo used automatically on Ubuntu) ----------------
 _apt_present() { [[ "$FORCE_REINSTALL" == "1" ]] && return 1; dpkg -s "$1" &>/dev/null; }
-tool_nmap()    { _apt_present nmap    && return 3; apt_tool nmap; }     # port scanner
-tool_massdns() { _apt_present massdns && return 3; apt_tool massdns; }  # shuffledns dependency
+tool_nmap()    { _apt_present nmap    && return 0; apt_tool nmap; }     # port scanner
+tool_massdns() { _apt_present massdns && return 0; apt_tool massdns; }  # shuffledns dependency
 
 # ---- git-cloned tools -------------------------------------------------------
 tool_sqlmap() {
-  present sqlmap && return 3
+  present sqlmap && return 0
   local dir="$TOOLS_DIR/sqlmap"
   clone_tool "https://github.com/sqlmapproject/sqlmap.git" "$dir" || return 1
   make_launcher sqlmap "python3 $dir/sqlmap.py"
 }
 
 tool_backupkiller() {
-  present backupkiller && return 3
+  present backupkiller && return 0
   local dir="$TOOLS_DIR/backupkiller"
   clone_tool "https://github.com/Q0120S/BackupKiller.git" "$dir" || return 1
   run_as "$NORMAL_USER" "cd '$dir' && python3 -m venv .venv && \
@@ -364,7 +364,7 @@ tool_backupkiller() {
 
 # ---- Rust-built tool --------------------------------------------------------
 tool_x8() {
-  present x8 && return 3
+  present x8 && return 0
   have cargo || [[ -x /root/.cargo/bin/cargo ]] || { log_error "cargo unavailable (Rust stage failed?)"; return 1; }
   local dir="$TOOLS_DIR/x8"
   clone_tool "https://github.com/sh1yo/x8" "$dir" || return 1
@@ -376,7 +376,7 @@ tool_x8() {
 tool_seclists() {
   [[ "$INSTALL_SECLISTS" == "1" ]] || return 3
   if [[ "$FORCE_REINSTALL" != "1" ]] && { dpkg -s seclists &>/dev/null || [[ -d "$TOOLS_DIR/SecLists" ]]; }; then
-    return 3
+    return 0
   fi
   apt_tool seclists || clone_tool "https://github.com/danielmiessler/SecLists.git" "$TOOLS_DIR/SecLists"
 }
@@ -493,7 +493,7 @@ base_setup() {
 }
 
 # =============================================================================
-#  SECTION 11 — Kali repo on Ubuntu (safe apt pinning)
+#  SECTION 12 — Kali repo on Ubuntu (safe apt pinning)
 # =============================================================================
 setup_kali_repo_on_ubuntu() {
   (( IS_UBUNTU )) || return 3
@@ -518,7 +518,7 @@ EOF
 }
 
 # =============================================================================
-#  SECTION 12 — zsh
+#  SECTION 13 — zsh
 # =============================================================================
 install_zsh() {
   [[ "$INSTALL_ZSH" == "1" ]] || return 3
@@ -543,7 +543,7 @@ EOF
 }
 
 # =============================================================================
-#  SECTION 13 — Go toolchain
+#  SECTION 14 — Go toolchain
 # =============================================================================
 install_go() {
   [[ "$INSTALL_GO" == "1" ]] || return 3
@@ -597,7 +597,7 @@ EOF
 }
 
 # =============================================================================
-#  SECTION 14 — Rust toolchain (rustup, apt fallback for filtered networks)
+#  SECTION 15 — Rust toolchain (rustup, apt fallback for filtered networks)
 # =============================================================================
 install_rust() {
   [[ "$INSTALL_RUST" == "1" ]] || return 3
@@ -630,7 +630,7 @@ EOF
 }
 
 # =============================================================================
-#  SECTION 15 — ProjectDiscovery pdtm + tools + nuclei templates
+#  SECTION 16 — ProjectDiscovery pdtm + tools + nuclei templates
 # =============================================================================
 install_pdtm() {
   [[ "$INSTALL_PDTM" == "1" ]] || return 3
@@ -644,8 +644,16 @@ install_pdtm() {
   local users=("$NORMAL_USER")
   [[ "$PDTM_FOR_ROOT" == "1" ]] && users=("root" "$NORMAL_USER")
 
-  local u
+  local u uhome
   for u in "${users[@]}"; do
+    # pdtm/nuclei write into ~/.config and ~/.pdtm; make sure the target user
+    # owns those (a previous root run can leave them root-owned -> "permission
+    # denied"). Create and chown them before running as that user.
+    uhome="$(getent passwd "$u" | cut -d: -f6)"
+    if [[ -n "$uhome" ]]; then
+      install -d -o "$u" -g "$u" "$uhome/.config" "$uhome/.pdtm" 2>/dev/null || true
+      chown -R "$u":"$u" "$uhome/.config" "$uhome/.pdtm" 2>/dev/null || true
+    fi
     _run "installing all PD tools for $u" run_as "$u" "pdtm -ia -duc" \
       || log_warn "pdtm -ia reported issues for $u"
     _run "updating nuclei templates for $u" run_as "$u" "nuclei -update-templates -duc" \
@@ -654,7 +662,7 @@ install_pdtm() {
 }
 
 # =============================================================================
-#  SECTION 16 — v2ray core + v2rayA GUI
+#  SECTION 17 — v2ray core + v2rayA GUI
 # =============================================================================
 install_v2ray() {
   [[ "$INSTALL_V2RAY" == "1" ]] || return 3
@@ -700,7 +708,7 @@ install_v2raya() {
 }
 
 # =============================================================================
-#  SECTION 16b — Network location gate
+#  SECTION 18 — Network location gate
 # -----------------------------------------------------------------------------
 #  go.dev (and rustup / crates.io / raw.githubusercontent) are filtered from
 #  Iran. Two conditions decide whether we may continue to the network-heavy
@@ -782,7 +790,7 @@ connectivity_gate() {
 }
 
 # =============================================================================
-#  SECTION 17 — Catalogue (--list-tools) & final report
+#  SECTION 19 — Catalogue (--list-tools) & final report
 # =============================================================================
 list_tools() {
   printf '\n%s%sTool catalogue%s  (%s v%s)\n\n' \
@@ -796,6 +804,15 @@ list_tools() {
   printf '\n%sProjectDiscovery suite (via pdtm -ia)%s\n  ' "$C_BOLD" "$C_RESET"
   # shellcheck disable=SC2086  # intentional: split the list into separate args
   printf '%s ' $PDTM_TOOLS; printf '\n\n'
+}
+
+# True if a ProjectDiscovery tool is actually present (root or user pdtm bin,
+# or anywhere on PATH).
+pd_present() {
+  local t="$1"
+  [[ -x "/root/.pdtm/go/bin/$t" ]] && return 0
+  [[ -n "${USER_HOME:-}" && -x "$USER_HOME/.pdtm/go/bin/$t" ]] && return 0
+  command -v "$t" >/dev/null 2>&1
 }
 
 print_report() {
@@ -816,13 +833,28 @@ print_report() {
   done
 
   if [[ ${#TOOL_STATE[@]} -gt 0 ]]; then
-    printf '\n  %sRecon tools%s\n' "$C_BOLD" "$C_RESET"
-    local entry name desc _fn st
+    printf '\n  %sRecon toolkit%s\n' "$C_BOLD" "$C_RESET"
+    local entry name desc _fn word
     for entry in "${TOOLKIT[@]}"; do
       IFS='|' read -r name desc _fn <<<"$entry"
-      st="${TOOL_STATE[$name]:-—}"
-      case "$st" in OK) colour=$C_GREEN ;; FAIL) colour=$C_RED ;; SKIP) colour=$C_YELLOW ;; *) colour=$C_DIM ;; esac
-      printf '    %s%-4s%s %-13s %s\n' "$colour" "$st" "$C_RESET" "$name" "$desc"
+      case "${TOOL_STATE[$name]:-}" in
+        OK)   colour=$C_GREEN;  word="installed" ;;
+        FAIL) colour=$C_RED;    word="failed" ;;
+        SKIP) colour=$C_YELLOW; word="skipped" ;;
+        *)    colour=$C_DIM;    word="not run" ;;
+      esac
+      printf '    %s%-9s%s %-13s %s\n' "$colour" "$word" "$C_RESET" "$name" "$desc"
+    done
+  fi
+
+  # Full ProjectDiscovery suite with each tool's actual presence.
+  if [[ "$INSTALL_PDTM" == "1" ]]; then
+    printf '\n  %sProjectDiscovery tools%s\n' "$C_BOLD" "$C_RESET"
+    local t
+    # shellcheck disable=SC2086  # intentional word-splitting of the tool list
+    for t in $PDTM_TOOLS; do
+      if pd_present "$t"; then colour=$C_GREEN; word="installed"; else colour=$C_RED; word="missing"; fi
+      printf '    %s%-9s%s %s\n' "$colour" "$word" "$C_RESET" "$t"
     done
   fi
 
@@ -831,7 +863,7 @@ print_report() {
 }
 
 # =============================================================================
-#  SECTION 18 — Pipeline definition & main
+#  SECTION 20 — Pipeline definition & main
 # =============================================================================
 # Pipeline stages, in execution order — "Label|function".
 # v2ray/v2rayA come before the network gate so the user can route traffic out
